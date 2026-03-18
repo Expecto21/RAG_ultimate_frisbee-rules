@@ -1,7 +1,7 @@
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter
 import os
 import re
 
@@ -43,12 +43,44 @@ rule_blocks = []
 for section in md_sections:
     rule_blocks.extend(split_section_into_rule_blocks(section))
 
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=700,
-    chunk_overlap=100,
-    separators=["\n\n", "\n", " "],
-)
-md_chunks = text_splitter.split_documents(rule_blocks)
+def split_rule_blocks_consistently(documents, chunk_size=700, chunk_overlap=100):
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be smaller than chunk_size")
+
+    chunks = []
+    step = chunk_size - chunk_overlap
+
+    for doc in documents:
+        text = (doc.page_content or "").strip()
+        if not text:
+            continue
+
+        if len(text) <= chunk_size:
+            metadata = dict(doc.metadata)
+            metadata["child_chunk_index"] = 0
+            chunks.append(Document(page_content=text, metadata=metadata))
+            continue
+
+        chunk_index = 0
+        start = 0
+        while start < len(text):
+            end = min(start + chunk_size, len(text))
+            chunk_text = text[start:end].strip()
+            if chunk_text:
+                metadata = dict(doc.metadata)
+                metadata["child_chunk_index"] = chunk_index
+                chunks.append(Document(page_content=chunk_text, metadata=metadata))
+
+            if end >= len(text):
+                break
+
+            start += step
+            chunk_index += 1
+
+    return chunks
+
+
+md_chunks = split_rule_blocks_consistently(rule_blocks, chunk_size=700, chunk_overlap=100)
 embeddings=OllamaEmbeddings(model="mxbai-embed-large")
 
 db_location = "./chroma_langchain_db"
@@ -82,5 +114,5 @@ if add_documents:
     
 retriever = vector_store.as_retriever(
     search_type="mmr",
-    search_kwargs={"k": 8, "fetch_k": 24}
+    search_kwargs={"k": 7, "fetch_k": 24}
 )
