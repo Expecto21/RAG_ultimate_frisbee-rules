@@ -44,8 +44,8 @@ for section in md_sections:
     rule_blocks.extend(split_section_into_rule_blocks(section))
 
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1100,
-    chunk_overlap=120,
+    chunk_size=700,
+    chunk_overlap=100,
     separators=["\n\n", "\n", " "],
 )
 md_chunks = text_splitter.split_documents(rule_blocks)
