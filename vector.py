@@ -4,8 +4,11 @@ from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 import os
 import re
+from pathlib import Path
 
-with open("Data/UsauRules.md", "r", encoding="utf-8") as f:
+rules_path = Path(__file__).resolve().parent / "data" / "usauRules.md"
+
+with open(rules_path, "r", encoding="utf-8") as f:
     md_text = f.read()
 
 headers_to_split_on = [("##", "section_title")]
@@ -114,5 +117,5 @@ if add_documents:
     
 retriever = vector_store.as_retriever(
     search_type="mmr",
-    search_kwargs={"k": 7, "fetch_k": 24}
+    search_kwargs={"k": 6, "fetch_k": 24}
 )
