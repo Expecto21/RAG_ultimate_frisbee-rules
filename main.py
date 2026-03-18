@@ -1,50 +1,54 @@
 from langchain_ollama import OllamaLLM
 from langchain_core.prompts import ChatPromptTemplate
 from vector import retriever
+import streamlit as st
+
+st.set_page_config(page_title="USAU Rules Bot", page_icon="🥏",layout="centered")
+
+def load_resources():
+    model = OllamaLLM(model="llama3.2", temperature=0.2, repeat_penalty=1.15)
+
+    ULTIMATE_SLANG = {
+        "greatest": "A player jumps from in-bounds, catches near the sideline, and releases a legal throw before landing out-of-bounds.",
+        "calahan": "A defensive player catches the offense's pass in the offense's end zone for an immediate score.",
+        "hospital pass": "A floaty or risky throw that exposes the receiver to heavy defensive pressure or contact.",
+        "layout": "A fully extended dive attempt to catch or block a disc.",
+        "sky": "To catch a disc over another player at the highest point.",
+        "skyed": "A catch over another player that may involve vertical space/receiving foul considerations.",
+        "hammer": "An overhand throw with the disc upside down in flight.",
+        "strip": "A call about possession being dislodged; see possession and Rule 17.I.4.d context.",
+        "universe": "Double game point.",
+        "brick": "A pull that lands out of bounds or in the brick-mark area.",
+        "ref": "Observer / Game Advisor context in a primarily self-officiated game.",
+        "official": "Observer / Game Advisor context in a primarily self-officiated game.",
+        "foul call": "Infraction / violation style player-initiated call.",
+    }
+
+    slang_glossary = "\n".join([f"- {term}: {definition}" for term, definition in ULTIMATE_SLANG.items()])
+
+    template="""Your job is to answer the user's question based STRICTLY on the provided rules context.
+
+    Constraints:
+    1. Use ONLY the provided rules context to answer the question. Do not assume intent or use outside knowledge of other sports.
+    2. If the answer is not in the context, say: "I cannot answer this based on the provided rules."
+    3. Response style ratio: about 80 percent synthesized explanation and application in plain English, and about 20 percent direct quoting.
+    4. Act like a translator: explain what the rules mean in practical terms for the user's specific scenario.
+    5. Always cite the specific rule numbers you used to form your answer.
+
+    Slang Glossary:
+    {slang_glossary}
+
+    Rules Context:
+    {rules_context}
+
+    Question: {question}
+    """ 
 
 
-model = OllamaLLM(model="llama3.2", temperature=0.2, repeat_penalty=1.15)
+    prompt = ChatPromptTemplate.from_template(template)
+    return prompt | model, slang_glossary
 
-ULTIMATE_SLANG = {
-    "greatest": "A player jumps from in-bounds, catches near the sideline, and releases a legal throw before landing out-of-bounds.",
-    "calahan": "A defensive player catches the offense's pass in the offense's end zone for an immediate score.",
-    "hospital pass": "A floaty or risky throw that exposes the receiver to heavy defensive pressure or contact.",
-    "layout": "A fully extended dive attempt to catch or block a disc.",
-    "sky": "To catch a disc over another player at the highest point.",
-    "skyed": "A catch over another player that may involve vertical space/receiving foul considerations.",
-    "hammer": "An overhand throw with the disc upside down in flight.",
-    "strip": "A call about possession being dislodged; see possession and Rule 17.I.4.d context.",
-    "universe": "Double game point.",
-    "brick": "A pull that lands out of bounds or in the brick-mark area.",
-    "ref": "Observer / Game Advisor context in a primarily self-officiated game.",
-    "official": "Observer / Game Advisor context in a primarily self-officiated game.",
-    "foul call": "Infraction / violation style player-initiated call.",
-}
-
-slang_glossary = "\n".join([f"- {term}: {definition}" for term, definition in ULTIMATE_SLANG.items()])
-
-template="""Your job is to answer the user's question based STRICTLY on the provided rules context.
-
-Constraints:
-1. Use ONLY the provided rules context to answer the question. Do not assume intent or use outside knowledge of other sports.
-2. If the answer is not in the context, say: "I cannot answer this based on the provided rules."
-3. Response style ratio: about 80 percent synthesized explanation and application in plain English, and about 20 percent direct quoting.
-4. Act like a translator: explain what the rules mean in practical terms for the user's specific scenario.
-5. Always cite the specific rule numbers you used to form your answer.
-
-Slang Glossary:
-{slang_glossary}
-
-Rules Context:
-{rules_context}
-
-Question: {question}
-""" 
-
-
-prompt = ChatPromptTemplate.from_template(template)
-
-chain = prompt | model
+chain, slang_glossary = load_resources()
 
 
 def format_rules_context(chunks):
@@ -65,29 +69,49 @@ def format_rules_context(chunks):
         )
     return "\n\n".join(formatted_chunks)
 
-while True:
-    print("\n-----------------------------------")
-    question = input("Ask a question about the rules of ultimate frisbee (or type 'q' to quit): ")
-    question = question.strip()
-    if not question:
-        continue
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    if question.lower() == 'q':
-        break
+st.title("USAU Rules RAG")
+st.markdown("Expert of the official USA Ultimate Rulebook.")
 
-    rules = retriever.invoke(question)
-    print("Referenced Chunks:")
-    for i, chunk in enumerate(rules, start=1):
-        section_title = chunk.metadata.get("section_title", "Unknown Section")
-        rule_id = chunk.metadata.get("rule_id", "Unknown Rule")
-        child_chunk_index = chunk.metadata.get("child_chunk_index", "N/A")
-        chunk_id = chunk.metadata.get("chunk_id", "N/A")
-        print(f"\n[{i}] section={section_title} | rule={rule_id} | child_chunk={child_chunk_index} | chunk_id={chunk_id}")
-        print("Chunk Text:")
-        print(chunk.page_content)
+# CHANGE: Display previous messages from the history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-    print("\nAnswer:")
-    rules_context = format_rules_context(rules)
-    result=chain.invoke({"rules_context":rules_context, "question":question, "slang_glossary":slang_glossary})
-    print(result)
+# CHANGE: Replaced 'input()' loop with 'st.chat_input'
+if question := st.chat_input("Ask about a rule (e.g., 'What happens on a strip?')"):
+    
+    # Display user question
+    st.session_state.messages.append({"role": "user", "content": question})
+    with st.chat_message("user"):
+        st.markdown(question)
+
+    # CHANGE: Replaced print() statements with a UI Spinner and Chat Message
+    with st.chat_message("assistant"):
+        with st.spinner("Searching Rulebook..."):
+            # 1. Retrieval
+            rules = retriever.invoke(question)
+            rules_context = format_rules_context(rules)
+            
+            # 2. Generation
+            result = chain.invoke({
+                "rules_context": rules_context, 
+                "question": question, 
+                "slang_glossary": slang_glossary
+            })
+            
+            # 3. Show Answer
+            st.markdown(result)
+            
+            # CHANGE: Added an Expandable section to show the "Source Chunks" 
+            # This is a huge "plus" for a resume to show transparency in RAG.
+            with st.expander("View Referenced Rule Chunks"):
+                for i, chunk in enumerate(rules, start=1):
+                    st.write(f"**{i}. Rule {chunk.metadata.get('rule_id')}** ({chunk.metadata.get('section_title')})")
+                    st.info(chunk.page_content)
+
+    # Save assistant response to history
+    st.session_state.messages.append({"role": "assistant", "content": result})
 
