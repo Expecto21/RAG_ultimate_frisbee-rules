@@ -3,6 +3,5 @@ langchain-ollama
 langchain-chroma
 langchain-text-splitters
 python-dotenv
-pinecone-client
+pinecone
 langchain-pinecone
-langchain-openai

@@ -1,15 +1,19 @@
 from dotenv import load_dotenv
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
+from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter
 import os
 import re
 
 load_dotenv()
 
-with open("Data/UsauRules.md", "r", encoding="utf-8") as f:
+rules_path = "data/usauRules.md"
+if not os.path.exists(rules_path):
+    rules_path = "data/usauRules.md"
+
+with open(rules_path, "r", encoding="utf-8") as f:
     md_text = f.read()
 
 headers_to_split_on = [("##", "section_title")]
@@ -26,7 +30,7 @@ def split_section_into_rule_blocks(section_doc):
 
     matches = list(rule_pattern.finditer(text))
     if not matches:
-        return [section_doc]
+        return []
 
     blocks = []
     for i, match in enumerate(matches):
@@ -43,84 +47,133 @@ def split_section_into_rule_blocks(section_doc):
     return blocks
 
 
-rule_blocks = []
-for section in md_sections:
-    rule_blocks.extend(split_section_into_rule_blocks(section))
+def extract_rule_chunks(section_docs):
+    chunks = []
+    for section_doc in section_docs:
+        chunks.extend(split_section_into_rule_blocks(section_doc))
+    return chunks
 
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=700,
-    chunk_overlap=100,
-    separators=["\n\n", "\n", " "],
-)
-md_chunks = text_splitter.split_documents(rule_blocks)
+
+# Keep full section context before structural rule chunking.
+for section in md_sections:
+    section.page_content = (section.page_content or "").strip()
+
+md_chunks = extract_rule_chunks(md_sections)
 
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
-openai_api_key = os.getenv("OPENAI_API_KEY")
 index_name = os.getenv("PINECONE_INDEX_NAME", "usau-rules")
 namespace = os.getenv("PINECONE_NAMESPACE", "usau-rules-v1")
 pinecone_cloud = os.getenv("PINECONE_CLOUD", "aws")
 pinecone_region = os.getenv("PINECONE_REGION", "us-east-1")
-embed_model = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+pinecone_host = os.getenv("PINECONE_HOST", "").strip()
+embed_model = os.getenv("OLLAMA_EMBED_MODEL", "mxbai-embed-large")
+embedding_dimension = int(os.getenv("PINECONE_EMBED_DIM", "1024"))
+rebuild_namespace = os.getenv("PINECONE_REBUILD", "false").strip().lower() == "true"
 
 if not pinecone_api_key:
     raise ValueError("Missing PINECONE_API_KEY in environment variables.")
-if not openai_api_key:
-    raise ValueError("Missing OPENAI_API_KEY in environment variables.")
-
-if embed_model == "text-embedding-3-small":
-    embedding_dimension = 1536
-elif embed_model == "text-embedding-3-large":
-    embedding_dimension = 3072
-else:
-    raise ValueError(
-        "Unsupported OPENAI_EMBED_MODEL. Use text-embedding-3-small or text-embedding-3-large."
-    )
 
 pc = Pinecone(api_key=pinecone_api_key)
 
-existing_indexes = [idx["name"] for idx in pc.list_indexes().to_dict().get("indexes", [])]
-if index_name not in existing_indexes:
-    pc.create_index(
-        name=index_name,
-        dimension=embedding_dimension,
-        metric="cosine",
-        spec=ServerlessSpec(cloud=pinecone_cloud, region=pinecone_region),
-    )
+if pinecone_host:
+    index = pc.Index(host=pinecone_host)
+else:
+    existing_indexes = pc.list_indexes().names()
+    if index_name not in existing_indexes:
+        print(f"Creating new cloud index: {index_name}...")
+        pc.create_index(
+            name=index_name,
+            dimension=embedding_dimension,
+            metric="cosine",
+            spec=ServerlessSpec(cloud=pinecone_cloud, region=pinecone_region),
+        )
+    else:
+        index_description = pc.describe_index(index_name)
+        existing_dimension = (
+            index_description.dimension
+            if hasattr(index_description, "dimension")
+            else index_description.get("dimension")
+        )
+        if existing_dimension and int(existing_dimension) != embedding_dimension:
+            raise ValueError(
+                f"Pinecone index '{index_name}' dimension is {existing_dimension}, "
+                f"but model '{embed_model}' uses {embedding_dimension}. "
+                "Set PINECONE_INDEX_NAME to a new index or set PINECONE_EMBED_DIM to match your index."
+            )
 
-index = pc.Index(index_name)
+    index = pc.Index(index_name)
 stats = index.describe_index_stats()
 namespace_count = stats.get("namespaces", {}).get(namespace, {}).get("vector_count", 0)
+if rebuild_namespace and namespace_count > 0:
+    print(f"Rebuilding namespace '{namespace}'...")
+    index.delete(delete_all=True, namespace=namespace)
+    namespace_count = 0
+
 add_documents = namespace_count == 0
 
-embeddings = OpenAIEmbeddings(model=embed_model, api_key=openai_api_key)
+embeddings = OllamaEmbeddings(model=embed_model)
 
+docs = []
+ids = []
 if add_documents:
-    ids = []
-    documents = []
     for i, section in enumerate(md_chunks):
+        matched_rule_ids = [m.group("rule_id") for m in rule_pattern.finditer(section.page_content)]
+        rule_id_summary = ", ".join(matched_rule_ids[:6])
+        if len(matched_rule_ids) > 6:
+            rule_id_summary += ", ..."
+
         document = Document(
             page_content=section.page_content,
             metadata={
                 "source": "USAU",
                 "section_title": section.metadata.get("section_title", ""),
-                "rule_id": section.metadata.get("rule_id", ""),
-                "chunk_id": i,
+                "rule_id": rule_id_summary,
+                "chunk_id": str(i),
             },
             id=str(i)
         )
         ids.append(str(i))
-        documents.append(document)
+        docs.append(document)
 
-vector_store = PineconeVectorStore(
-    index=index,
-    embedding=embeddings,
-    namespace=namespace,
-)
+if pinecone_host:
+    vector_store = PineconeVectorStore(
+        index_name=index_name,
+        embedding=embeddings,
+        namespace=namespace,
+        pinecone_api_key=pinecone_api_key,
+        host=pinecone_host,
+    )
+else:
+    vector_store = PineconeVectorStore(
+        index=index,
+        embedding=embeddings,
+        namespace=namespace,
+    )
 
 if add_documents:
-    vector_store.add_documents(documents=documents, ids=ids)
+    print("Uploading USAU rules to Pinecone Cloud...")
+    upsert_batch_size = int(os.getenv("PINECONE_UPSERT_BATCH", "16"))
+
+    vectors = []
+    for doc in docs:
+        vectors.append({
+            "id": doc.id,
+            "values": embeddings.embed_query(doc.page_content),
+            "metadata": {**dict(doc.metadata), "text": doc.page_content},
+        })
+
+    for start in range(0, len(vectors), upsert_batch_size):
+        batch = vectors[start:start + upsert_batch_size]
+        index.upsert(vectors=batch, namespace=namespace)
+
+    print("Upload complete!")
     
 retriever = vector_store.as_retriever(
     search_type="mmr",
-    search_kwargs={"k": 8, "fetch_k": 24}
+    search_kwargs={"k": 4, "fetch_k": 24}
 )
+
+
+def cloud_similarity_search(query: str, k: int = 3):
+    """Semantic search directly against the Pinecone cloud index."""
+    return vector_store.similarity_search(query, k=k)

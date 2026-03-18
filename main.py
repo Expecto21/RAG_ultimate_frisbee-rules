@@ -3,7 +3,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from vector import retriever
 
 
-model = OllamaLLM(model="llama3.2")
+model = OllamaLLM(model="llama3.2", temperature=.1)
 
 ULTIMATE_SLANG = {
     "greatest": "A player jumps from in-bounds, catches near the sideline, and releases a legal throw before landing out-of-bounds.",
@@ -19,6 +19,7 @@ ULTIMATE_SLANG = {
     "ref": "Observer / Game Advisor context in a primarily self-officiated game.",
     "official": "Observer / Game Advisor context in a primarily self-officiated game.",
     "foul call": "Infraction / violation style player-initiated call.",
+    "stall down": "Stall-out",
 }
 
 slang_glossary = "\n".join([f"- {term}: {definition}" for term, definition in ULTIMATE_SLANG.items()])
@@ -39,7 +40,7 @@ Rules Context:
 {rules_context}
 
 Question: {question}
-Answer:""" 
+""" 
 
 
 prompt = ChatPromptTemplate.from_template(template)
