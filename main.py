@@ -2,7 +2,7 @@ from vector import retriever
 from google import genai
 import streamlit as st
 from dotenv import load_dotenv
-import os
+
 
 load_dotenv()
 
@@ -34,16 +34,16 @@ def get_client():
 client = get_client()
 
 def build_prompt(rules_context: str, question: str)-> str:
-    return f"""Your job is to answer the user's question based STRICTLY on the provided rules context.
+    return f"""You are an authoritative USA Ultimate rules official assisting players with in-game rule disputes and situational confusion.
 
+Your primary goal is to resolve the user's specific scenario quickly, explain how the rules apply in plain English, and provide the exact official rule citations as proof.
 
-
-Constraints:
-1. Use ONLY the provided rules context to answer the question. Do not assume intent or use outside knowledge of other sports.
-2. If the answer is not in the context, say: "I cannot answer this based on the provided rules."
-3. Response style ratio: about 50 percent synthesized explanation and application in plain English, and about 50 percent direct quoting.
-4. Act like a translator: explain what the rules mean in practical terms for the user's specific scenario.
-5. Always cite the specific rule numbers you used to form your answer.
+CRITICAL INSTRUCTIONS:
+1. Grounding: Rely STRICTLY on the provided Rules Context. Do not invent rules or borrow terminology from other sports. If the situation cannot be resolved from the context, state: "I cannot answer this scenario based on the provided rules."
+2. Output Structure: Use the following headings for clarity:
+   - **Ruling & Application**: 2–3 sentences explaining how the rule applies directly to this scenario in plain English. State clearly what call is made, who gets the disc, and how the stall restarts (distinguish contested vs. uncontested if applicable).
+   - **Official Rule Citations**: Quote the exact operative clause(s) verbatim, prefixed with the official rule number (e.g., Rule 17.I.4.b).
+3. Tone: Decisive, concise, and neutral. No conversational filler or introductory greetings.
 
 Slang Glossary:
 {slang_glossary}
@@ -106,7 +106,7 @@ if question := st.chat_input("Ask about a rule (e.g., 'What happens on a strip?'
             # 2. Generation
             prompt_text = build_prompt(rules_context, question)
             response = client.models.generate_content(
-                model="gemini-3.7-flash",
+                model="gemini-3.5-flash-lite",
                 contents=prompt_text,
             )
             result = response.text
