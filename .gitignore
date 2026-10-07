@@ -159,6 +159,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local vector database
+chroma_langchain_db/
+
 # Spyder project settings
 .spyderproject
 .spyproject
