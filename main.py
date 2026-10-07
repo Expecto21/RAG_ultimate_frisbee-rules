@@ -1,54 +1,62 @@
-from langchain_ollama import OllamaLLM
-from langchain_core.prompts import ChatPromptTemplate
 from vector import retriever
+from google import genai
 import streamlit as st
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 st.set_page_config(page_title="USAU Rules Bot", page_icon="🥏",layout="centered")
 
-def load_resources():
-    model = OllamaLLM(model="llama3.2", temperature=0.2, repeat_penalty=1.15)
 
-    ULTIMATE_SLANG = {
-        "greatest": "A player jumps from in-bounds, catches near the sideline, and releases a legal throw before landing out-of-bounds.",
-        "calahan": "A defensive player catches the offense's pass in the offense's end zone for an immediate score.",
-        "hospital pass": "A floaty or risky throw that exposes the receiver to heavy defensive pressure or contact.",
-        "layout": "A fully extended dive attempt to catch or block a disc.",
-        "sky": "To catch a disc over another player at the highest point.",
-        "skyed": "A catch over another player that may involve vertical space/receiving foul considerations.",
-        "hammer": "An overhand throw with the disc upside down in flight.",
-        "strip": "A call about possession being dislodged; see possession and Rule 17.I.4.d context.",
-        "universe": "Double game point.",
-        "brick": "A pull that lands out of bounds or in the brick-mark area.",
-        "ref": "Observer / Game Advisor context in a primarily self-officiated game.",
-        "official": "Observer / Game Advisor context in a primarily self-officiated game.",
-        "foul call": "Infraction / violation style player-initiated call.",
-    }
+ULTIMATE_SLANG = {
+    "greatest": "A player jumps from in-bounds, catches near the sideline, and releases a legal throw before landing out-of-bounds.",
+    "calahan": "A defensive player catches the offense's pass in the offense's end zone for an immediate score.",
+    "hospital pass": "A floaty or risky throw that exposes the receiver to heavy defensive pressure or contact.",
+    "layout": "A fully extended dive attempt to catch or block a disc.",
+    "sky": "To catch a disc over another player at the highest point.",
+    "skyed": "A catch over another player that may involve vertical space/receiving foul considerations.",
+    "hammer": "An overhand throw with the disc upside down in flight.",
+    "strip": "A call about possession being dislodged; see possession and Rule 17.I.4.d context.",
+    "universe": "Double game point.",
+    "brick": "A pull that lands out of bounds or in the brick-mark area.",
+    "ref": "Observer / Game Advisor context in a primarily self-officiated game.",
+    "official": "Observer / Game Advisor context in a primarily self-officiated game.",
+    "foul call": "Infraction / violation style player-initiated call.",
+}
 
-    slang_glossary = "\n".join([f"- {term}: {definition}" for term, definition in ULTIMATE_SLANG.items()])
+slang_glossary = "\n".join([f"- {term}: {definition}" for term, definition in ULTIMATE_SLANG.items()])
 
-    template="""Your job is to answer the user's question based STRICTLY on the provided rules context.
+@st.cache_resource
+def get_client():
+    return genai.Client()
 
-    Constraints:
-    1. Use ONLY the provided rules context to answer the question. Do not assume intent or use outside knowledge of other sports.
-    2. If the answer is not in the context, say: "I cannot answer this based on the provided rules."
-    3. Response style ratio: about 50 percent synthesized explanation and application in plain English, and about 50 percent direct quoting.
-    4. Act like a translator: explain what the rules mean in practical terms for the user's specific scenario.
-    5. Always cite the specific rule numbers you used to form your answer.
+client = get_client()
 
-    Slang Glossary:
-    {slang_glossary}
-
-    Rules Context:
-    {rules_context}
-
-    Question: {question}
-    """ 
+def build_prompt(rules_context: str, question: str)-> str:
+    return f"""Your job is to answer the user's question based STRICTLY on the provided rules context.
 
 
-    prompt = ChatPromptTemplate.from_template(template)
-    return prompt | model, slang_glossary
 
-chain, slang_glossary = load_resources()
+Constraints:
+1. Use ONLY the provided rules context to answer the question. Do not assume intent or use outside knowledge of other sports.
+2. If the answer is not in the context, say: "I cannot answer this based on the provided rules."
+3. Response style ratio: about 50 percent synthesized explanation and application in plain English, and about 50 percent direct quoting.
+4. Act like a translator: explain what the rules mean in practical terms for the user's specific scenario.
+5. Always cite the specific rule numbers you used to form your answer.
+
+Slang Glossary:
+{slang_glossary}
+
+Rules Context:
+{rules_context}
+
+Question: {question}
+""" 
+
+
+
+
 
 
 def format_rules_context(chunks):
@@ -96,11 +104,12 @@ if question := st.chat_input("Ask about a rule (e.g., 'What happens on a strip?'
             rules_context = format_rules_context(rules)
             
             # 2. Generation
-            result = chain.invoke({
-                "rules_context": rules_context, 
-                "question": question, 
-                "slang_glossary": slang_glossary
-            })
+            prompt_text = build_prompt(rules_context, question)
+            response = client.models.generate_content(
+                model="gemini-3.7-flash",
+                contents=prompt_text,
+            )
+            result = response.text
             
             # 3. Show Answer
             st.markdown(result)
