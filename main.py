@@ -31,7 +31,7 @@ def load_resources():
     Constraints:
     1. Use ONLY the provided rules context to answer the question. Do not assume intent or use outside knowledge of other sports.
     2. If the answer is not in the context, say: "I cannot answer this based on the provided rules."
-    3. Response style ratio: about 80 percent synthesized explanation and application in plain English, and about 20 percent direct quoting.
+    3. Response style ratio: about 50 percent synthesized explanation and application in plain English, and about 50 percent direct quoting.
     4. Act like a translator: explain what the rules mean in practical terms for the user's specific scenario.
     5. Always cite the specific rule numbers you used to form your answer.
 
